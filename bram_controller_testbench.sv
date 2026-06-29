@@ -2,7 +2,6 @@
 
 module tb_cme_bram_ctrl();
 
-    // Clock and Reset
     logic PCLK;
     logic PRESETn;
 
@@ -20,7 +19,6 @@ module tb_cme_bram_ctrl();
     logic              search_valid;
     logic              block_done;
 
-    // DUT Instantiation
     cme_bram_ctrl dut (
         .PCLK(PCLK),
         .PRESETn(PRESETn),
@@ -42,7 +40,6 @@ module tb_cme_bram_ctrl();
         forever #5 PCLK = ~PCLK;
     end
 
-    // Monitor the search process
     int search_cnt = 0;
     always_ff @(posedge PCLK) begin
         if (search_valid) begin
@@ -50,7 +47,6 @@ module tb_cme_bram_ctrl();
             if (search_cnt == 1) begin
                 $display("Time: %0t | First scan started! blk(%0d,%0d) -> search_x: %0d, search_y: %0d", 
                          $time, blk_x_out, blk_y_out, search_x, search_y);
-                // Print a sample of the data loaded into the arrays
                 $display("             Sample Data -> curr[0][0]: %0d, ref[0][0]: %0d", 
                          curr_block[0][0], ref_block[0][0]);
             end
@@ -78,9 +74,7 @@ module tb_cme_bram_ctrl();
         end
     endtask
 
-    // Main Test Sequence
     initial begin
-        // Initialize Signals
         #0.2 PRESETn  <= 0;
         #0.2 Y_in     <= 0;
         #0.2 valid_in <= 0;
@@ -93,8 +87,7 @@ module tb_cme_bram_ctrl();
         $display("--- Starting CME_BRAM_CTRL Tests ---");
         $display("Feeding 35 lines of 512 pixels to cross the 32-line FSM threshold...");
 
-        // Feed 35 lines to trigger processing of Block (0,0)
-        // 32 lines are the threshold, 35 ensures we have plenty of data in the buffer
+        // 32 lines are the threshold, plenty of data in the buffer
         for (int line = 0; line < 35; line++) begin
             send_line(512, (line == 0), (line * 10)); // length=512, frame start if line 0
             
@@ -104,11 +97,10 @@ module tb_cme_bram_ctrl();
         
         $display("Finished streaming initial 35 lines. Waiting for FSM to complete Block (0,0) search...");
 
-        // The FSM will take ~2800 clock cycles to complete a single block's search window.
-        // We wait for the block_done signal to assert to prove it finished.
+        // wait for the block_done signal to assert to prove it finished.
         wait(block_done);
         
-        // Wait a few more cycles to let the FSM transition to NEXT_BLOCK / IDLE
+        // Wait more cycles to let the FSM transition to NEXT_BLOCK / IDLE
         repeat(10) @(posedge PCLK);
 
         $display("--- Tests Complete ---");
