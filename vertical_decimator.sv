@@ -4,29 +4,23 @@ module v_decim (
     input  logic               PCLK,
     input  logic               PRESETn,
 
-    // Configuration
     input  logic [6:0][15:0]   v_filt_coeffs_i,
-    input  logic [10:0]        v_size_i, // (Max 1088 lines)
+    input  logic [10:0]        v_size_i, 
 
-    // Input Stream (From H_DECIM)
     input  logic [7:0]         Y_in,
     input  logic [1:0]         valid_in,
 
-    // Output Stream (To CME_BRAM_CTRL)
     output logic [7:0]         Y_out,
     output logic [1:0]         valid_out
 );
 
-    // =========================================================================
-    // 1. Input FIFO (16-Deep, Synchronous)
-    // =========================================================================
-    logic [9:0] fifo_mem [0:15]; // {valid[1:0], Y[7:0]}
+    logic [9:0] fifo_mem [0:15]; 
     logic [4:0] wr_ptr;
     logic [4:0] rd_ptr;
     
     wire fifo_full  = (wr_ptr == {~rd_ptr[4], rd_ptr[3:0]});
     wire fifo_empty = (wr_ptr == rd_ptr);
-    wire pop        = !fifo_empty; // Always consume if data exists and pipeline isn't stalled
+    wire pop        = !fifo_empty; 
 
     always_ff @(posedge PCLK or negedge PRESETn) begin
         if (!PRESETn) begin
@@ -49,9 +43,7 @@ module v_decim (
         end
     end
 
-    // =========================================================================
-    // 2. Frame Coordinates Tracking
-    // =========================================================================
+
     logic [11:0] x_cnt;
     logic [11:0] y_cnt;
 
@@ -62,20 +54,17 @@ module v_decim (
         end else if (pop) begin
             if (fifo_valid == 2'b11) begin
                 x_cnt <= 12'd0;
-                y_cnt <= 12'd0;       // Frame Start resets both
+                y_cnt <= 12'd0;      
             end else if (fifo_valid == 2'b10) begin
-                x_cnt <= 12'd0;       // Line Start resets X
-                y_cnt <= y_cnt + 1'b1; // Increment Y
+                x_cnt <= 12'd0;     
+                y_cnt <= y_cnt + 1'b1; 
             end else if (fifo_valid == 2'b01) begin
                 x_cnt <= x_cnt + 1'b1;
             end
         end
     end
 
-    // =========================================================================
-    // 3. 6-Line Delay Buffer (Cascaded SDP BRAMs)
-    // =========================================================================
-    // We instantiate 6 individual line memories. Max X is 512 (2048/4).
+
     logic [7:0] line_mem [0:5][0:511];
     logic [7:0] delay_rdata [0:5];
 
@@ -85,7 +74,7 @@ module v_decim (
 
     always_ff @(posedge PCLK) begin
         if (pop) begin
-            // Read-First behavior: Read the old value, write the new value
+    
             delay_rdata[0] <= line_mem[0][x_cnt[8:0]];
             line_mem[0][x_cnt[8:0]] <= fifo_Y;
 
@@ -104,23 +93,19 @@ module v_decim (
             delay_rdata[5] <= line_mem[5][x_cnt[8:0]];
             line_mem[5][x_cnt[8:0]] <= delay_rdata[4];
 
-            // Pipeline controls alongside BRAM read latency
             valid_d1  <= fifo_valid;
             y_cnt_d1  <= y_cnt;
             fifo_Y_d1 <= fifo_Y;
         end else begin
-            valid_d1  <= 2'b00; // Insert bubble if no valid data
+            valid_d1  <= 2'b00; 
         end
     end
 
-    // =========================================================================
-    // 4. Tap Multiplexing (Top Edge Padding)
-    // =========================================================================
+
     logic [7:0] mac_tap [0:6];
     logic [7:0] avail_lines [0:6];
 
     always_comb begin
-        // Align available lines: [6] is newest, [0] is oldest (5 lines delayed)
         avail_lines[6] = fifo_Y_d1;
         avail_lines[5] = delay_rdata[0];
         avail_lines[4] = delay_rdata[1];
@@ -129,7 +114,6 @@ module v_decim (
         avail_lines[1] = delay_rdata[4];
         avail_lines[0] = delay_rdata[5];
 
-        // Dynamic Top-Padding Multiplexer
         mac_tap[6] = avail_lines[6];
         mac_tap[5] = (y_cnt_d1 < 12'd1) ? mac_tap[6] : avail_lines[5];
         mac_tap[4] = (y_cnt_d1 < 12'd2) ? mac_tap[5] : avail_lines[4];
@@ -139,9 +123,7 @@ module v_decim (
         mac_tap[0] = (y_cnt_d1 < 12'd6) ? mac_tap[1] : avail_lines[0];
     end
 
-    // =========================================================================
-    // 5. Output Trigger & Validation Logic
-    // =========================================================================
+
     logic [1:0] out_trigger_v;
     always_comb begin
         // Only trigger output on lines 3, 7, 11, 15... (Decimate by 4 vertically)
@@ -157,11 +139,6 @@ module v_decim (
         end
     end
 
-    // =========================================================================
-    // 6. FIR Filter Pipeline (3 Stages)
-    // =========================================================================
-    
-    // --- Stage 1: Multipliers ---
     logic signed [24:0] mult_res [0:6];
     logic [1:0]         pipe1_valid;
 
@@ -177,7 +154,6 @@ module v_decim (
         end
     end
 
-    // --- Stage 2: Adder Tree ---
     logic signed [27:0] add_res;
     logic [1:0]         pipe2_valid;
 
@@ -192,7 +168,6 @@ module v_decim (
         end
     end
 
-    // --- Stage 3: Round, Shift, and Clamp ---
     always_ff @(posedge PCLK or negedge PRESETn) begin
         if (!PRESETn) begin
             valid_out <= 2'b00;
