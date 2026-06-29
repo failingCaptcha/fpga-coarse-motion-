@@ -9,19 +9,17 @@ module cme_bram_ctrl (
     input  logic [1:0]         valid_in,
 
     // Output to CME_COMPUTE
-    output logic [7:0]         curr_block [0:7][0:7], // 8x8 Current Block
-    output logic [7:0]         ref_block  [0:7][0:7], // 8x8 Reference Block
-    output logic signed [5:0]  search_x,              // -24 to +24
-    output logic signed [5:0]  search_y,              // -24 to +24
-    output logic [11:0]        blk_x_out,             // Current block X index
-    output logic [11:0]        blk_y_out,             // Current block Y index
-    output logic               search_valid,          // High when blocks are ready for SAD
-    output logic               block_done             // High when 49x49 window is complete
+    output logic [7:0]         curr_block [0:7][0:7], 
+    output logic [7:0]         ref_block  [0:7][0:7], 
+    output logic signed [5:0]  search_x,              
+    output logic signed [5:0]  search_y,              
+    output logic [11:0]        blk_x_out,             
+    output logic [11:0]        blk_y_out,             
+    output logic               search_valid,         
+    output logic               block_done             
 );
 
-    // =========================================================================
-    // 1. Input FIFO (16-Deep)
-    // =========================================================================
+
     logic [9:0] fifo_mem [0:15];
     logic [4:0] wr_ptr, rd_ptr;
     
@@ -46,9 +44,6 @@ module cme_bram_ctrl (
         else if (pop) rd_ptr <= rd_ptr + 1'b1;
     end
 
-    // =========================================================================
-    // 2. Write Coordinate Tracking & Banked BRAM
-    // =========================================================================
     logic [11:0] wr_x;
     logic [11:0] wr_y;
     logic [31:0] total_lines_written; // Absolute tracker for read/write safety
@@ -86,9 +81,6 @@ module cme_bram_ctrl (
         end
     end
 
-    // =========================================================================
-    // 3. Read Address Generation (Unaligned Column Fetch)
-    // =========================================================================
     logic signed [12:0] rx_req, ry_req;
     logic [14:0] bank_rd_addr [0:7];
     logic [7:0]  bank_rdata [0:7];
@@ -109,9 +101,7 @@ module cme_bram_ctrl (
         end
     end
 
-    // =========================================================================
-    // 4. Barrel Shifter & Bounds Checking
-    // =========================================================================
+
     logic [2:0] align_shift, align_shift_d1;
     logic       out_of_bounds, out_of_bounds_d1;
 
@@ -133,9 +123,6 @@ module cme_bram_ctrl (
         end
     end
 
-    // =========================================================================
-    // 5. Search Window FSM & Shift Registers
-    // =========================================================================
     typedef enum logic [2:0] {
         IDLE, LOAD_CURR, WAIT_SEARCH, PREFETCH_REF, SCAN_REF, NEXT_ROW, NEXT_BLOCK
     } fsm_state_t;
@@ -249,7 +236,7 @@ module cme_bram_ctrl (
                     rx_req <= blk_x * 8 + sx + fetch_cnt;
                     ry_req <= blk_y * 8 + sy;
                     state_d1 <= 2'd2;
-                    sx <= sx + 1'b1; // Shift the reported coordinate
+                    sx <= sx + 1'b1; 
                     
                     // 49 locations means fetch_cnt goes up to 8 + 48 = 56
                     if (fetch_cnt == 6'd56) begin
@@ -278,7 +265,6 @@ module cme_bram_ctrl (
                     if (blk_x == 12'd63) begin
                         blk_x <= 12'd0;
                         blk_y <= blk_y + 1'b1;
-                        // For a real continuous system, blk_y resets at 33 (272/8)
                         if (blk_y == 12'd33) blk_y <= 12'd0; 
                     end else begin
                         blk_x <= blk_x + 1'b1;
