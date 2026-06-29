@@ -48,7 +48,7 @@ module tb_cme_apb_csr();
         #20;
         #0.2 PRESETn <= 1;
         #20;
-        apb_write(16'h4000, 32'h12345678, err_flag); // Just to verify coverage
+        apb_write(16'h4000, 32'h12345678, err_flag); 
         apb_read(16'h4000, read_val, err_flag);
         $display("Tests initialized. PSLVERR logic active.");
         $finish;
