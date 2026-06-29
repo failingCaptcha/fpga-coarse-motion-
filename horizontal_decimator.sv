@@ -6,7 +6,7 @@ module h_decim (
 
     // Configuration
     input  logic [6:0][15:0]   h_filt_coeffs_i,
-    input  logic [11:0]        h_size_i, // (Currently unused locally due to perfect mod-4 decimation, but good for future bounds checking)
+    input  logic [11:0]        h_size_i, 
 
     // Input Stream
     input  logic [7:0]         Y_in,
@@ -17,16 +17,13 @@ module h_decim (
     output logic [1:0]         valid_out
 );
 
-    // =========================================================================
-    // 1. Input FIFO (16-Deep, Synchronous)
-    // =========================================================================
     logic [9:0] fifo_mem [0:15]; // {valid[1:0], Y[7:0]}
     logic [4:0] wr_ptr;
     logic [4:0] rd_ptr;
     
     wire fifo_full  = (wr_ptr == {~rd_ptr[4], rd_ptr[3:0]});
     wire fifo_empty = (wr_ptr == rd_ptr);
-    wire pop        = !fifo_empty; // We can always consume if data exists
+    wire pop        = !fifo_empty; //
 
     always_ff @(posedge PCLK or negedge PRESETn) begin
         if (!PRESETn) begin
@@ -37,7 +34,7 @@ module h_decim (
         end
     end
 
-    // LUTRAM asynchronous read (Valid in the same cycle pop is evaluated)
+    // LUTRAM asynchronous read
     wire [9:0] fifo_rdata = fifo_mem[rd_ptr[3:0]];
     wire [7:0] Y_fifo     = fifo_rdata[7:0];
     wire [1:0] valid_fifo = fifo_rdata[9:8];
@@ -50,9 +47,7 @@ module h_decim (
         end
     end
 
-    // =========================================================================
-    // 2. Shift Register & Decimation Control
-    // =========================================================================
+
     logic [7:0]  tap [0:6];
     logic [11:0] in_cnt;
     logic [1:0]  saved_start_valid;
@@ -70,12 +65,11 @@ module h_decim (
         end else if (pop) begin
             if (valid_fifo[1] == 1'b1) begin 
                 // valid == 2 or 3 (First pixel of the line)
-                // Left padding: Replicate the first pixel across the first 4 taps
                 tap[0] <= Y_fifo;
                 tap[1] <= Y_fifo;
                 tap[2] <= Y_fifo;
                 tap[3] <= Y_fifo;
-                tap[4] <= 8'd0; // Don't care yet
+                tap[4] <= 8'd0; 
                 tap[5] <= 8'd0;
                 tap[6] <= 8'd0;
                 
@@ -84,7 +78,6 @@ module h_decim (
                 trigger_pipe      <= 1'b0;
                 pipe_valid_in     <= 2'b00;
             end else begin
-                // Standard shift
                 tap[0] <= tap[1];
                 tap[1] <= tap[2];
                 tap[2] <= tap[3];
@@ -95,11 +88,9 @@ module h_decim (
                 
                 in_cnt <= in_cnt + 1'b1;
 
-                // Trigger MAC every 4th pixel (Decimate by 4)
                 // in_cnt == 3 becoming 4, 7 becoming 8, 11 becoming 12, etc.
                 if (in_cnt[1:0] == 2'b11) begin
                     trigger_pipe  <= 1'b1;
-                    // First output of the line gets the saved '2' or '3'. Rest get '1'.
                     pipe_valid_in <= (in_cnt == 12'd3) ? saved_start_valid : 2'b01; 
                 end else begin
                     trigger_pipe  <= 1'b0;
@@ -112,11 +103,8 @@ module h_decim (
         end
     end
 
-    // =========================================================================
-    // 3. FIR Filter Pipeline (3 Stages)
-    // =========================================================================
+
     
-    // --- Stage 1: Multipliers ---
     logic signed [24:0] mult_res [0:6];
     logic [1:0]         pipe1_valid;
 
@@ -135,7 +123,6 @@ module h_decim (
         end
     end
 
-    // --- Stage 2: Adder Tree ---
     logic signed [27:0] add_res;
     logic [1:0]         pipe2_valid;
 
@@ -152,7 +139,6 @@ module h_decim (
         end
     end
 
-    // --- Stage 3: Round, Shift, and Clamp ---
     always_ff @(posedge PCLK or negedge PRESETn) begin
         if (!PRESETn) begin
             valid_out <= 2'b00;
@@ -160,11 +146,9 @@ module h_decim (
         end else begin
             valid_out <= pipe2_valid;
             if (pipe2_valid != 2'b00) begin
-                // Add 0x8000 for rounding, then arithmetic shift right by 16
                 automatic logic signed [27:0] rounded = add_res + 28'h00008000;
                 automatic logic signed [27:0] shifted = rounded >>> 16;
                 
-                // Clamp to 0-255
                 if (shifted < 0) begin
                     Y_out <= 8'd0;
                 end else if (shifted > 255) begin
