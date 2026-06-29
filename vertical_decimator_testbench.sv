@@ -2,23 +2,18 @@
 
 module tb_v_decim();
 
-    // Clock and Reset
     logic PCLK;
     logic PRESETn;
 
-    // Configuration
     logic [6:0][15:0] v_filt_coeffs_i;
     logic [10:0]      v_size_i;
 
-    // Input Stream
     logic [7:0]       Y_in;
     logic [1:0]       valid_in;
 
-    // Output Stream
     logic [7:0]       Y_out;
     logic [1:0]       valid_out;
 
-    // DUT Instantiation
     v_decim dut (
         .PCLK(PCLK),
         .PRESETn(PRESETn),
@@ -30,13 +25,12 @@ module tb_v_decim();
         .valid_out(valid_out)
     );
 
-    // Clock Generation (150 MHz)
     initial begin
         PCLK = 0;
         forever #5 PCLK = ~PCLK;
     end
 
-    // Monitor Outputs
+    //  Outputs
     int output_pixel_cnt = 0;
     int output_line_cnt  = 0;
     int frame_start_cnt  = 0;
@@ -55,14 +49,12 @@ module tb_v_decim();
         end
     end
 
-    // Task to send a simulated frame of size W x H
     task send_frame(input int width, input int height, input int start_val, input logic add_bubbles);
         int current_val = start_val;
         begin
             for (int y = 0; y < height; y++) begin
                 for (int x = 0; x < width; x++) begin
                     
-                    // Inject a bubble (pipeline stall) randomly if enabled
                     if (add_bubbles && (x % 5 == 2 || y % 3 == 1 && x == 4)) begin
                         @ (posedge PCLK);
                         #0.2 valid_in <= 2'b00;
@@ -79,15 +71,12 @@ module tb_v_decim();
                     current_val++;
                 end
             end
-            // End of frame, stop streaming
             @ (posedge PCLK);
             #0.2 valid_in <= 2'b00;
         end
     endtask
 
-    // Test Sequence
     initial begin
-        // Initialize Signals
         #0.2 PRESETn       <= 0;
         #0.2 Y_in          <= 0;
         #0.2 valid_in      <= 0;
@@ -102,24 +91,19 @@ module tb_v_decim();
         #0.2 v_filt_coeffs_i[5] <= 16'd8192;
         #0.2 v_filt_coeffs_i[6] <= 16'd4096;
 
-        // Apply Reset
         #20;
         #0.2 PRESETn <= 1;
         #20;
 
         $display("--- Starting v_decim Tests ---");
 
-        // ----------------------------------------------------
-        // TEST 1: Continuous Frame (16 pixels x 12 lines)
-        // ----------------------------------------------------
         $display("\nTEST 1: Sending 16x12 frame (Continuous)...");
         output_pixel_cnt = 0;
         output_line_cnt  = 0;
         frame_start_cnt  = 0;
         
-        send_frame(16, 12, 10, 1'b0); // width=16, height=12, start_val=10, no bubbles
+        send_frame(16, 12, 10, 1'b0); 
         
-        // Wait for pipeline and 6-line buffer to flush through the compute
         repeat(50) @ (posedge PCLK);
         
         // Decimating 12 lines by 4 = 3 lines. 3 lines * 16 pixels = 48 outputs.
@@ -132,20 +116,15 @@ module tb_v_decim();
         if (frame_start_cnt == 1)   $display("PASS: Test 1 flagged exactly 1 Frame Start (valid=3).");
         else                        $display("FAIL: Test 1 flagged %0d Frame Starts (expected 1).", frame_start_cnt);
 
-        // ----------------------------------------------------
-        // TEST 2: Bursty Frame with Bubbles (16 pixels x 8 lines)
-        // ----------------------------------------------------
         $display("\nTEST 2: Sending 16x8 frame with bubbles (stalls)...");
         output_pixel_cnt = 0;
         output_line_cnt  = 0;
         frame_start_cnt  = 0;
         
-        send_frame(16, 8, 100, 1'b1); // width=16, height=8, start_val=100, with bubbles
+        send_frame(16, 8, 100, 1'b1); 
         
-        // Wait for pipeline to drain
         repeat(50) @ (posedge PCLK);
 
-        // Decimating 8 lines by 4 = 2 lines. 2 lines * 16 pixels = 32 outputs.
         if (output_pixel_cnt == 32) $display("PASS: Test 2 produced exactly 32 pixels despite bubbles.");
         else                        $display("FAIL: Test 2 produced %0d pixels (expected 32).", output_pixel_cnt);
 
