@@ -1,11 +1,9 @@
 `timescale 1ns / 1ps
 
 module cme_top (
-    // Clock and Reset
     input  logic        PCLK,
     input  logic        PRESETn,
 
-    // APB3 Host Interface
     input  logic        PSEL,
     input  logic        PENABLE,
     input  logic        PWRITE,
@@ -15,31 +13,23 @@ module cme_top (
     output logic        PREADY,
     output logic        PSLVERR,
 
-    // Video Input Stream
     input  logic [7:0]  Y_in,
     input  logic [1:0]  valid_in
 );
 
-    // =========================================================================
-    // Interconnect Signals
-    // =========================================================================
-    
-    // Configuration & Control (CSR -> Pipeline)
+
     logic               enable;
     logic [11:0]        h_size;
     logic [10:0]        v_size;
     logic [6:0][15:0]   h_filt_coeffs;
     logic [6:0][15:0]   v_filt_coeffs;
 
-    // Stream 1 (H_DECIM -> V_DECIM)
     logic [7:0]         h_Y_out;
     logic [1:0]         h_valid_out;
 
-    // Stream 2 (V_DECIM -> CME_BRAM_CTRL)
     logic [7:0]         v_Y_out;
     logic [1:0]         v_valid_out;
 
-    // BRAM Control -> Compute Engine
     logic [7:0]         curr_block [0:7][0:7];
     logic [7:0]         ref_block  [0:7][0:7];
     logic signed [5:0]  search_x;
@@ -49,21 +39,14 @@ module cme_top (
     logic               search_valid;
     logic               block_done;
 
-    // Compute Engine -> CSR (Results Write-back)
     logic [11:0]        compute_waddr;
     logic [31:0]        compute_wdata;
     logic               compute_wen;
 
-    // =========================================================================
-    // Input Gating Logic
-    // =========================================================================
-    // Only allow data into the pipeline if the host has enabled the core
+
     logic [1:0] gated_valid_in;
     assign gated_valid_in = enable ? valid_in : 2'b00;
 
-    // =========================================================================
-    // 1. APB Configuration & Status Registers (CSR)
-    // =========================================================================
     cme_apb_csr u_csr (
         .PCLK           (PCLK),
         .PRESETn        (PRESETn),
@@ -85,9 +68,7 @@ module cme_top (
         .compute_wen    (compute_wen)
     );
 
-    // =========================================================================
-    // 2. Horizontal Decimator (H_DECIM)
-    // =========================================================================
+
     h_decim u_h_decim (
         .PCLK           (PCLK),
         .PRESETn        (PRESETn),
@@ -99,9 +80,7 @@ module cme_top (
         .valid_out      (h_valid_out)
     );
 
-    // =========================================================================
-    // 3. Vertical Decimator (V_DECIM)
-    // =========================================================================
+
     v_decim u_v_decim (
         .PCLK           (PCLK),
         .PRESETn        (PRESETn),
@@ -113,9 +92,6 @@ module cme_top (
         .valid_out      (v_valid_out)
     );
 
-    // =========================================================================
-    // 4. 3-Ring Buffer & Alignment Control (CME_BRAM_CTRL)
-    // =========================================================================
     cme_bram_ctrl u_bram_ctrl (
         .PCLK           (PCLK),
         .PRESETn        (PRESETn),
@@ -131,9 +107,6 @@ module cme_top (
         .block_done     (block_done)
     );
 
-    // =========================================================================
-    // 5. SAD Compute Engine (CME_COMPUTE)
-    // =========================================================================
     cme_compute u_compute (
         .PCLK           (PCLK),
         .PRESETn        (PRESETn),
