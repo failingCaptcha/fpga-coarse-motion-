@@ -1,0 +1,202 @@
+`timescale 1ns / 1ps
+
+module tb_cme_top();
+
+    // Clock and Reset
+    logic PCLK;
+    logic PRESETn;
+
+    // APB3 Interface
+    logic        PSEL;
+    logic        PENABLE;
+    logic        PWRITE;
+    logic [15:0] PADDR;
+    logic [31:0] PWDATA;
+    logic [31:0] PRDATA;
+    logic        PREADY;
+    logic        PSLVERR;
+
+    // Video Input Stream
+    logic [7:0]  Y_in;
+    logic [1:0]  valid_in;
+
+    // DUT Instantiation
+    cme_top dut (
+        .PCLK(PCLK),
+        .PRESETn(PRESETn),
+        .PSEL(PSEL),
+        .PENABLE(PENABLE),
+        .PWRITE(PWRITE),
+        .PADDR(PADDR),
+        .PWDATA(PWDATA),
+        .PRDATA(PRDATA),
+        .PREADY(PREADY),
+        .PSLVERR(PSLVERR),
+        .Y_in(Y_in),
+        .valid_in(valid_in)
+    );
+
+    // Clock Generation (150 MHz)
+    initial begin
+        PCLK = 0;
+        forever #5 PCLK = ~PCLK;
+    end
+
+    // =========================================================================
+    // APB Bus Tasks
+    // =========================================================================
+    task apb_write(input [15:0] addr, input [31:0] data, output logic slverr);
+        begin
+            @ (posedge PCLK);
+            #0.2 PSEL    <= 1'b1;
+            #0.2 PENABLE <= 1'b0;
+            #0.2 PWRITE  <= 1'b1;
+            #0.2 PADDR   <= addr;
+            #0.2 PWDATA  <= data;
+            
+            @ (posedge PCLK);
+            #0.2 PENABLE <= 1'b1;
+            
+            @ (posedge PCLK);
+            slverr = PSLVERR;
+            #0.2 PSEL    <= 1'b0;
+            #0.2 PENABLE <= 1'b0;
+            #0.2 PWRITE  <= 1'b0;
+        end
+    endtask
+
+    task apb_read(input [15:0] addr, output [31:0] data, output logic slverr);
+        begin
+            @ (posedge PCLK);
+            #0.2 PSEL    <= 1'b1;
+            #0.2 PENABLE <= 1'b0;
+            #0.2 PWRITE  <= 1'b0;
+            #0.2 PADDR   <= addr;
+            
+            @ (posedge PCLK);
+            #0.2 PENABLE <= 1'b1;
+            
+            @ (posedge PCLK);
+            data   = PRDATA;
+            slverr = PSLVERR;
+            #0.2 PSEL    <= 1'b0;
+            #0.2 PENABLE <= 1'b0;
+        end
+    endtask
+
+    // =========================================================================
+    // Video Stream Task
+    // =========================================================================
+    task send_video_frame(input int width, input int height);
+        begin
+            $display("Time: %0t | Starting Video Frame Stream (%0dx%0d)...", $time, width, height);
+            for (int y = 0; y < height; y++) begin
+                for (int x = 0; x < width; x++) begin
+                    @ (posedge PCLK);
+                    #0.2 Y_in <= 8'((x + y) % 256); // Simple test pattern
+                    
+                    if (x == 0 && y == 0)      #0.2 valid_in <= 2'b11; // Frame Start
+                    else if (x == 0)           #0.2 valid_in <= 2'b10; // Line Start
+                    else                       #0.2 valid_in <= 2'b01; // Valid Pixel
+                end
+                
+                // Horizontal blanking period (bubbles)
+                for (int b = 0; b < 10; b++) begin
+                    @ (posedge PCLK);
+                    #0.2 valid_in <= 2'b00;
+                end
+            end
+            $display("Time: %0t | Video Frame Stream Complete.", $time);
+        end
+    endtask
+
+    // =========================================================================
+    // Main Test Sequence
+    // =========================================================================
+    logic err_flag;
+    logic [31:0] read_val;
+
+    initial begin
+        // Initialize Signals
+        #0.2 PRESETn  <= 0;
+        #0.2 PSEL     <= 0;
+        #0.2 PENABLE  <= 0;
+        #0.2 PWRITE   <= 0;
+        #0.2 PADDR    <= 0;
+        #0.2 PWDATA   <= 0;
+        #0.2 Y_in     <= 0;
+        #0.2 valid_in <= 0;
+
+        // Apply Reset
+        #20;
+        #0.2 PRESETn <= 1;
+        #20;
+
+        $display("=================================================");
+        $display("--- Starting CME_TOP End-to-End System Test ---");
+        $display("=================================================\n");
+
+        // 1. Host configures the pipeline
+        $display("STEP 1: Host APB Configuration");
+        apb_write(16'h0004, 32'd256, err_flag);  // HSIZE = 256
+        apb_write(16'h0008, 32'd132, err_flag);  // VSIZE = 132
+
+        // Symmetric LPF Coefficients (Sum = 65536)
+        apb_write(16'h0020, 32'd4096,  err_flag); // H_FILT_0
+        apb_write(16'h0024, 32'd8192,  err_flag); // H_FILT_1
+        apb_write(16'h0028, 32'd8192,  err_flag); // H_FILT_2
+        apb_write(16'h002C, 32'd24576, err_flag); // H_FILT_3 (Center)
+        apb_write(16'h0030, 32'd8192,  err_flag); // H_FILT_4
+        apb_write(16'h0034, 32'd8192,  err_flag); // H_FILT_5
+        apb_write(16'h0038, 32'd4096,  err_flag); // H_FILT_6
+
+        apb_write(16'h0040, 32'd4096,  err_flag); // V_FILT_0
+        apb_write(16'h0044, 32'd8192,  err_flag); // V_FILT_1
+        apb_write(16'h0048, 32'd8192,  err_flag); // V_FILT_2
+        apb_write(16'h004C, 32'd24576, err_flag); // V_FILT_3 (Center)
+        apb_write(16'h0050, 32'd8192,  err_flag); // V_FILT_4
+        apb_write(16'h0054, 32'd8192,  err_flag); // V_FILT_5
+        apb_write(16'h0058, 32'd4096,  err_flag); // V_FILT_6
+        
+        // 2. Enable the Pipeline
+        $display("STEP 2: Enabling Pipeline (ENABLE = 1)");
+        apb_write(16'h0000, 32'd1, err_flag);
+
+        // 3. Stream Video Data
+        // 132 lines decimated by 4 = 33 lines. This crosses the 32-line FSM threshold.
+        $display("\nSTEP 3: Streaming Video Input...");
+        send_video_frame(256, 132); 
+
+        // 4. Wait for processing to hit the BRAM write output
+        $display("\nSTEP 4: Waiting for Compute Engine to finish Block (0,0)...");
+        
+        // Monitor the internal compute write-enable signal to know when it finishes
+        wait(dut.compute_wen == 1'b1);
+        $display("Time: %0t | SUCCESS! Pipeline completed search and wrote to BRAM.", $time);
+        
+        // Wait a few cycles for the BRAM write to settle
+        repeat(10) @(posedge PCLK);
+
+        // 5. Host Reads Back the Result
+        $display("\nSTEP 5: Host APB Read-back");
+        apb_read(16'h4000, read_val, err_flag); // Read Block (0,0) from 16k boundary
+        
+        if (!err_flag) begin
+            automatic logic signed [9:0] out_x = read_val[31:22];
+            automatic logic signed [9:0] out_y = read_val[21:12];
+            automatic logic [11:0] out_sad     = read_val[11:0];
+            $display("Read Address 0x4000: 0x%08x", read_val);
+            $display(" -> BEST_X : %0d", out_x);
+            $display(" -> BEST_Y : %0d", out_y);
+            $display(" -> BEST_SAD : %0d", out_sad);
+            $display("\nPASS: End-to-End System simulation successful.");
+        end else begin
+            $display("\nFAIL: APB Read encountered an error.");
+        end
+
+        $display("\n=================================================");
+        $display("--- Tests Complete ---");
+        $finish;
+    end
+
+endmodule

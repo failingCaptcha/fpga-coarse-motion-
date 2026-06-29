@@ -1,0 +1,107 @@
+`timescale 1ns / 1ps
+
+module cme_apb_csr (
+    input  logic        PCLK,
+    input  logic        PRESETn,
+    input  logic        PSEL,
+    input  logic        PENABLE,
+    input  logic        PWRITE,
+    input  logic [15:0] PADDR,
+    input  logic [31:0] PWDATA,
+    output logic [31:0] PRDATA,
+    output logic        PREADY,
+    output logic        PSLVERR,
+
+    output logic               enable_o,
+    output logic [11:0]        h_size_o,
+    output logic [10:0]        v_size_o,
+    output logic [6:0][15:0]   h_filt_coeffs_o,
+    output logic [6:0][15:0]   v_filt_coeffs_o,
+
+    input  logic [11:0]        compute_waddr,
+    input  logic [31:0]        compute_wdata,
+    input  logic               compute_wen
+);
+
+    logic [31:0] results_ram [0:2175];
+    logic [31:0] ram_rdata;
+    logic is_ram_read;
+    logic addr_valid;
+
+    always_ff @(posedge PCLK) begin
+        if (compute_wen) results_ram[compute_waddr] <= compute_wdata;
+    end
+
+    assign is_ram_read = (PADDR[15:14] == 2'b01) && (PADDR[13:2] < 2176);
+
+    always_comb begin
+        addr_valid = 1'b0;
+        if (PADDR[15:14] == 2'b00) begin
+            case (PADDR[15:0])
+                16'h0000, 16'h0004, 16'h0008,
+                16'h0020, 16'h0024, 16'h0028, 16'h002C, 16'h0030, 16'h0034, 16'h0038,
+                16'h0040, 16'h0044, 16'h0048, 16'h004C, 16'h0050, 16'h0054, 16'h0058: addr_valid = 1'b1;
+                default: addr_valid = 1'b0;
+            endcase
+        end else if (PADDR[15:14] == 2'b01) begin
+            if (is_ram_read && !PWRITE) addr_valid = 1'b1;
+        end
+    end
+
+    assign PSLVERR = PSEL && PENABLE && !addr_valid;
+    assign PREADY  = 1'b1;
+
+    always_ff @(posedge PCLK or negedge PRESETn) begin
+        if (!PRESETn) begin
+            enable_o <= 1'b0;
+            h_size_o <= 12'd1920;
+            v_size_o <= 11'd1088;
+            for (int i = 0; i < 7; i++) begin
+                h_filt_coeffs_o[i] <= 16'd0;
+                v_filt_coeffs_o[i] <= 16'd0;
+            end
+        end else if (PSEL && PENABLE && PWRITE && addr_valid) begin
+            case (PADDR[15:0])
+                16'h0000: enable_o <= PWDATA[0];
+                16'h0004: h_size_o <= PWDATA[11:0];
+                16'h0008: v_size_o <= PWDATA[10:0];
+                16'h0020: h_filt_coeffs_o[0] <= PWDATA[15:0];
+                16'h0024: h_filt_coeffs_o[1] <= PWDATA[15:0];
+                16'h0028: h_filt_coeffs_o[2] <= PWDATA[15:0];
+                16'h002C: h_filt_coeffs_o[3] <= PWDATA[15:0];
+                16'h0030: h_filt_coeffs_o[4] <= PWDATA[15:0];
+                16'h0034: h_filt_coeffs_o[5] <= PWDATA[15:0];
+                16'h0038: h_filt_coeffs_o[6] <= PWDATA[15:0];
+                16'h0040: v_filt_coeffs_o[0] <= PWDATA[15:0];
+                16'h0044: v_filt_coeffs_o[1] <= PWDATA[15:0];
+                16'h0048: v_filt_coeffs_o[2] <= PWDATA[15:0];
+                16'h004C: v_filt_coeffs_o[3] <= PWDATA[15:0];
+                16'h0050: v_filt_coeffs_o[4] <= PWDATA[15:0];
+                16'h0054: v_filt_coeffs_o[5] <= PWDATA[15:0];
+                16'h0058: v_filt_coeffs_o[6] <= PWDATA[15:0];
+            endcase
+        end
+    end
+
+    always_ff @(posedge PCLK) begin
+        if (PSEL && !PENABLE && !PWRITE && is_ram_read) ram_rdata <= results_ram[PADDR[13:2]];
+    end
+
+    always_comb begin
+        PRDATA = 32'd0;
+        if (PSEL && PENABLE && !PWRITE && addr_valid) begin
+            if (PADDR[15:14] == 2'b01) PRDATA = ram_rdata;
+            else begin
+                case (PADDR[15:0])
+                    16'h0000: PRDATA = {31'd0, enable_o};
+                    16'h0004: PRDATA = {20'd0, h_size_o};
+                    16'h0008: PRDATA = {21'd0, v_size_o};
+                    16'h0020, 16'h0024, 16'h0028, 16'h002C, 16'h0030, 16'h0034, 16'h0038: 
+                        PRDATA = {16'd0, h_filt_coeffs_o[(PADDR[3:2])]};
+                    16'h0040, 16'h0044, 16'h0048, 16'h004C, 16'h0050, 16'h0054, 16'h0058: 
+                        PRDATA = {16'd0, v_filt_coeffs_o[(PADDR[3:2])]};
+                endcase
+            end
+        end
+    end
+endmodule
