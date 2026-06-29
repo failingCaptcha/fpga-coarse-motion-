@@ -2,11 +2,9 @@
 
 module tb_cme_top();
 
-    // Clock and Reset
     logic PCLK;
     logic PRESETn;
 
-    // APB3 Interface
     logic        PSEL;
     logic        PENABLE;
     logic        PWRITE;
@@ -16,11 +14,9 @@ module tb_cme_top();
     logic        PREADY;
     logic        PSLVERR;
 
-    // Video Input Stream
     logic [7:0]  Y_in;
     logic [1:0]  valid_in;
 
-    // DUT Instantiation
     cme_top dut (
         .PCLK(PCLK),
         .PRESETn(PRESETn),
@@ -36,15 +32,11 @@ module tb_cme_top();
         .valid_in(valid_in)
     );
 
-    // Clock Generation (150 MHz)
     initial begin
         PCLK = 0;
         forever #5 PCLK = ~PCLK;
     end
 
-    // =========================================================================
-    // APB Bus Tasks
-    // =========================================================================
     task apb_write(input [15:0] addr, input [31:0] data, output logic slverr);
         begin
             @ (posedge PCLK);
@@ -83,10 +75,7 @@ module tb_cme_top();
             #0.2 PENABLE <= 1'b0;
         end
     endtask
-
-    // =========================================================================
-    // Video Stream Task
-    // =========================================================================
+    
     task send_video_frame(input int width, input int height);
         begin
             $display("Time: %0t | Starting Video Frame Stream (%0dx%0d)...", $time, width, height);
@@ -110,14 +99,12 @@ module tb_cme_top();
         end
     endtask
 
-    // =========================================================================
-    // Main Test Sequence
-    // =========================================================================
+    
     logic err_flag;
     logic [31:0] read_val;
 
     initial begin
-        // Initialize Signals
+
         #0.2 PRESETn  <= 0;
         #0.2 PSEL     <= 0;
         #0.2 PENABLE  <= 0;
@@ -127,7 +114,6 @@ module tb_cme_top();
         #0.2 Y_in     <= 0;
         #0.2 valid_in <= 0;
 
-        // Apply Reset
         #20;
         #0.2 PRESETn <= 1;
         #20;
@@ -136,12 +122,10 @@ module tb_cme_top();
         $display("--- Starting CME_TOP End-to-End System Test ---");
         $display("=================================================\n");
 
-        // 1. Host configures the pipeline
         $display("STEP 1: Host APB Configuration");
         apb_write(16'h0004, 32'd256, err_flag);  // HSIZE = 256
         apb_write(16'h0008, 32'd132, err_flag);  // VSIZE = 132
 
-        // Symmetric LPF Coefficients (Sum = 65536)
         apb_write(16'h0020, 32'd4096,  err_flag); // H_FILT_0
         apb_write(16'h0024, 32'd8192,  err_flag); // H_FILT_1
         apb_write(16'h0028, 32'd8192,  err_flag); // H_FILT_2
@@ -158,23 +142,20 @@ module tb_cme_top();
         apb_write(16'h0054, 32'd8192,  err_flag); // V_FILT_5
         apb_write(16'h0058, 32'd4096,  err_flag); // V_FILT_6
         
-        // 2. Enable the Pipeline
         $display("STEP 2: Enabling Pipeline (ENABLE = 1)");
         apb_write(16'h0000, 32'd1, err_flag);
 
-        // 3. Stream Video Data
-        // 132 lines decimated by 4 = 33 lines. This crosses the 32-line FSM threshold.
+        // Stream Video Data
         $display("\nSTEP 3: Streaming Video Input...");
         send_video_frame(256, 132); 
 
-        // 4. Wait for processing to hit the BRAM write output
+        // Wait for processing to hit the BRAM write output
         $display("\nSTEP 4: Waiting for Compute Engine to finish Block (0,0)...");
         
-        // Monitor the internal compute write-enable signal to know when it finishes
         wait(dut.compute_wen == 1'b1);
         $display("Time: %0t | SUCCESS! Pipeline completed search and wrote to BRAM.", $time);
         
-        // Wait a few cycles for the BRAM write to settle
+        // few cycles for the BRAM write to settle
         repeat(10) @(posedge PCLK);
 
         // 5. Host Reads Back the Result
