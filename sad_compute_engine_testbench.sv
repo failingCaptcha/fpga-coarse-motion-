@@ -2,11 +2,9 @@
 
 module tb_cme_compute();
 
-    // Clock and Reset
     logic PCLK;
     logic PRESETn;
 
-    // Inputs from CME_BRAM_CTRL
     logic [7:0]        curr_block [0:7][0:7];
     logic [7:0]        ref_block  [0:7][0:7];
     logic signed [5:0] search_x;
@@ -16,12 +14,10 @@ module tb_cme_compute();
     logic              search_valid;
     logic              block_done;
 
-    // Outputs to CME_APB_CSR
     logic [11:0]       compute_waddr;
     logic [31:0]       compute_wdata;
     logic              compute_wen;
 
-    // DUT Instantiation
     cme_compute dut (
         .PCLK(PCLK),
         .PRESETn(PRESETn),
@@ -38,13 +34,11 @@ module tb_cme_compute();
         .compute_wen(compute_wen)
     );
 
-    // Clock Generation (150 MHz)
     initial begin
         PCLK = 0;
         forever #5 PCLK = ~PCLK;
     end
 
-    // Task to feed a search position into the pipeline
     task feed_search_pos(
         input logic signed [5:0] sx, 
         input logic signed [5:0] sy, 
@@ -60,7 +54,6 @@ module tb_cme_compute();
             search_x     <= sx;
             search_y     <= sy;
             
-            // Fill the 8x8 arrays with flat values for easy math
             for (int r = 0; r < 8; r++) begin
                 for (int c = 0; c < 8; c++) begin
                     curr_block[r][c] <= c_val;
@@ -70,14 +63,12 @@ module tb_cme_compute();
         end
     endtask
 
-    // Monitor for Output Write
     always_ff @(posedge PCLK) begin
         if (compute_wen) begin
             $display("Time: %0t | compute_wen Asserted!", $time);
             $display("  -> Write Address: %0d", compute_waddr);
             $display("  -> Write Data   : 0x%08x", compute_wdata);
             
-            // Unpack for display
             automatic logic signed [9:0] out_x = compute_wdata[31:22];
             automatic logic signed [9:0] out_y = compute_wdata[21:12];
             automatic logic [11:0] out_sad     = compute_wdata[11:0];
@@ -85,32 +76,25 @@ module tb_cme_compute();
         end
     end
 
-    // Main Test Sequence
     initial begin
-        // Initialize Signals
         #0.2 PRESETn      <= 0;
         #0.2 search_valid <= 0;
         #0.2 block_done   <= 0;
         #0.2 search_x     <= 0;
         #0.2 search_y     <= 0;
-        #0.2 blk_x_in     <= 12'd2; // Let's test block X = 2
-        #0.2 blk_y_in     <= 12'd1; // Let's test block Y = 1
+        #0.2 blk_x_in     <= 12'd2; 
+        #0.2 blk_y_in     <= 12'd1; 
         
         for (int r=0; r<8; r++) for (int c=0; c<8; c++) begin
             #0.2 curr_block[r][c] <= 8'd0;
             #0.2 ref_block[r][c]  <= 8'd0;
         end
 
-        // Apply Reset
         #20;
         #0.2 PRESETn <= 1;
         #20;
 
         $display("--- Starting CME_COMPUTE Tests ---");
-
-        // ----------------------------------------------------
-        // Simulate a Search Sequence for Block (2,1)
-        // ----------------------------------------------------
         
         // Pos 1 (First Scan): Diff = 10 per pixel -> SAD = 640
         feed_search_pos(-6'sd24, -6'sd24, 8'd50, 8'd40, 1'b0);
@@ -122,28 +106,20 @@ module tb_cme_compute();
         feed_search_pos(-6'sd22, -6'sd24, 8'd50, 8'd10, 1'b0);
         
         // Pos 4 (Extreme Mismatch & Saturation Check): Diff = 255 -> SAD = 16320 (Saturates to 4095)
-        // Also assert block_done to finish the search window
         feed_search_pos(-6'sd21, -6'sd24, 8'd255, 8'd0, 1'b1);
         
-        // Idle the input
         @ (posedge PCLK);
         #0.2 search_valid <= 1'b0;
         #0.2 block_done   <= 1'b0;
 
-        // ----------------------------------------------------
-        // Wait for Pipeline & Check Results
-        // ----------------------------------------------------
+
         $display("Pipeline stimulated. Waiting for write back...");
         
-        // The pipeline has 4 delay stages, plus 1 cycle to trigger write = 5-6 cycles delay
         repeat(10) @ (posedge PCLK);
 
-        // Expected Results for Verification
         // - Address: Y * 64 + X = 1 * 64 + 2 = 66 (0x042)
         // - Best X: Pos 2 was the best match -> -23
         // - Best Y: Pos 2 was the best match -> -24
-        // - Best SAD: Pos 2 SAD -> 128
-        
         if (compute_wen === 1'b0) $display("FAIL: compute_wen never asserted!");
         else begin
             if (compute_waddr == 12'd66) $display("PASS: Address stride correct (66)");
