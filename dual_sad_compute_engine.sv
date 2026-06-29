@@ -5,24 +5,20 @@ module cme_compute (
     input  logic               PRESETn,
 
     // Input from CME_BRAM_CTRL
-    input  logic [7:0]         curr_block [0:7][0:7], // 8x8 Current Block
-    input  logic [7:0]         ref_block  [0:7][0:7], // 8x8 Reference Block
-    input  logic signed [5:0]  search_x,              // Current search vector X
-    input  logic signed [5:0]  search_y,              // Current search vector Y
-    input  logic [11:0]        blk_x_in,              // Current block X index
-    input  logic [11:0]        blk_y_in,              // Current block Y index
-    input  logic               search_valid,          // High when blocks are ready
-    input  logic               block_done,            // High on the very last search location of a block
+    input  logic [7:0]         curr_block [0:7][0:7], 
+    input  logic [7:0]         ref_block  [0:7][0:7], 
+    input  logic signed [5:0]  search_x,              
+    input  logic signed [5:0]  search_y,              
+    input  logic [11:0]        blk_x_in,             
+    input  logic [11:0]        blk_y_in,              
+    input  logic               search_valid,          
+    input  logic               block_done,            
 
-    // Output to CME_APB_CSR
     output logic [11:0]        compute_waddr,
     output logic [31:0]        compute_wdata,
     output logic               compute_wen
 );
 
-    // =========================================================================
-    // Pipeline Control Delay Lines (4 Stages)
-    // =========================================================================
     logic signed [5:0] sx_pipe  [1:4];
     logic signed [5:0] sy_pipe  [1:4];
     logic [11:0]       bx_pipe  [1:4];
@@ -37,7 +33,6 @@ module cme_compute (
                 done_pipe[i] <= 1'b0;
             end
         end else begin
-            // Shift pipeline
             vld_pipe[1] <= search_valid;  done_pipe[1] <= block_done;
             vld_pipe[2] <= vld_pipe[1];   done_pipe[2] <= done_pipe[1];
             vld_pipe[3] <= vld_pipe[2];   done_pipe[3] <= done_pipe[2];
@@ -55,9 +50,6 @@ module cme_compute (
         end
     end
 
-    // =========================================================================
-    // STAGE 1: 64 Absolute Differences
-    // =========================================================================
     logic [7:0] abs_diff [0:63];
 
     always_ff @(posedge PCLK) begin
@@ -71,9 +63,6 @@ module cme_compute (
         end
     end
 
-    // =========================================================================
-    // STAGE 2: 16 Partial Sums (Adding groups of 4)
-    // =========================================================================
     logic [9:0] sum1 [0:15]; // Max value: 4 * 255 = 1020 (Requires 10 bits)
 
     always_ff @(posedge PCLK) begin
@@ -82,10 +71,8 @@ module cme_compute (
         end
     end
 
-    // =========================================================================
-    // STAGE 3: 4 Partial Sums (Adding groups of 4)
-    // =========================================================================
-    logic [11:0] sum2 [0:3]; // Max value: 4 * 1020 = 4080 (Requires 12 bits)
+
+    logic [11:0] sum2 [0:3]; 
 
     always_ff @(posedge PCLK) begin
         for (int i = 0; i < 4; i++) begin
@@ -93,23 +80,18 @@ module cme_compute (
         end
     end
 
-    // =========================================================================
-    // STAGE 4: Final SAD Summation
-    // =========================================================================
+
     logic [13:0] final_sum_reg; // Max value: 4 * 4080 = 16320 (Requires 14 bits)
 
     always_ff @(posedge PCLK) begin
         final_sum_reg <= sum2[0] + sum2[1] + sum2[2] + sum2[3];
     end
 
-    // =========================================================================
-    // STAGE 5: Minimum SAD Tracking
-    // =========================================================================
+
     logic [11:0]       best_sad;
     logic signed [9:0] best_x;
     logic signed [9:0] best_y;
     
-    // Write out triggers for Stage 6
     logic        trigger_write;
     logic [11:0] final_bx;
     logic [11:0] final_by;
@@ -121,14 +103,13 @@ module cme_compute (
             best_y        <= 10'd0;
             trigger_write <= 1'b0;
         end else begin
-            trigger_write <= 1'b0; // Default
+            trigger_write <= 1'b0; 
 
             if (vld_pipe[4]) begin
                 // Saturate 14-bit SAD to 12-bit max (4095)
-                automatic logic [11:0] current_sad = (final_sum_reg > 14'd4095) ? 12'd4095 : final_sum_reg[11:0];
+                logic [11:0] current_sad = (final_sum_reg > 14'd4095) ? 12'd4095 : final_sum_reg[11:0];
                 
-                // If it's the very first search position (-24, -24), auto-load the value
-                automatic logic is_first = (sx_pipe[4] == -6'sd24 && sy_pipe[4] == -6'sd24);
+                logic is_first = (sx_pipe[4] == -6'sd24 && sy_pipe[4] == -6'sd24);
 
                 if (is_first || (current_sad < best_sad)) begin
                     best_sad <= current_sad;
@@ -139,7 +120,6 @@ module cme_compute (
             end
 
             if (done_pipe[4]) begin
-                // The last pixel for the block was just processed. Trigger write-out for next cycle.
                 trigger_write <= 1'b1;
                 final_bx      <= bx_pipe[4];
                 final_by      <= by_pipe[4];
@@ -147,9 +127,7 @@ module cme_compute (
         end
     end
 
-    // =========================================================================
-    // STAGE 6: CSR APB Output
-    // =========================================================================
+
     always_ff @(posedge PCLK or negedge PRESETn) begin
         if (!PRESETn) begin
             compute_wen   <= 1'b0;
